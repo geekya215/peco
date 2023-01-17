@@ -6,13 +6,13 @@ import java.util.Optional;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
-public final class Combinator<A> {
+public final class Combinator {
     public static <A> Result<Tuple<A, State>> runOnInput(Parser<A> parser, State state) {
         return parser.fn().apply(state);
     }
 
     public static <A> Result<Tuple<A, State>> run(Parser<A> parser, String input) {
-        return runOnInput(parser, Func.fromString(input));
+        return runOnInput(parser, Input.fromString(input));
     }
 
     public static <A> Parser<A> setLabel(Parser<A> parser, String label) {
@@ -21,12 +21,12 @@ public final class Combinator<A> {
 
     public static Parser<Character> satisfy(Predicate<Character> predicate, String label) {
         Function<State, Result<Tuple<Character, State>>> fn = input -> {
-            var t = Func.nextChar(input);
+            var t = Input.nextChar(input);
             var remaining = t.t1();
             var c = t.t2();
             if (c.isEmpty()) {
                 var error = "No more input";
-                var location = Func.getLocationFromState(input);
+                var location = Input.getLocationFromState(input);
                 return Result.Failure.of(label, error, location);
             } else {
                 var first = c.get();
@@ -34,7 +34,7 @@ public final class Combinator<A> {
                     return Result.Success.of(Tuple.of(first, remaining));
                 } else {
                     var error = String.format("Unexpected '%c'", first);
-                    var location = Func.getLocationFromState(input);
+                    var location = Input.getLocationFromState(input);
                     return Result.Failure.of(label, error, location);
                 }
             }
@@ -51,8 +51,7 @@ public final class Combinator<A> {
                 var v = t.t1();
                 var remaining = t.t2();
                 var p2 = f.apply(v);
-                var r = runOnInput(p2, remaining);
-                return r;
+                return runOnInput(p2, remaining);
             } else {
                 return (Result.Failure) res;
             }
@@ -70,25 +69,25 @@ public final class Combinator<A> {
         return bind(x -> pure(f.apply(x)), p);
     }
 
-    public static <A, B> Parser<B> app(Parser<Function<A, B>> fp, Parser<A> xp) {
-        return bind(f -> bind(x -> pure(f.apply(x)), xp), fp);
+    public static <A, B> Parser<B> apply(Parser<Function<A, B>> fp, Parser<A> p) {
+        return bind(f -> bind(x -> pure(f.apply(x)), p), fp);
     }
 
     public static <A, B, C> Parser<C> lift2(Function<A, Function<B, C>> f, Parser<A> x, Parser<B> y) {
-        return app(app(pure(f), x), y);
+        return apply(apply(pure(f), x), y);
     }
 
-    public static <A, B> Parser<Tuple<A, B>> then(Parser<A> x, Parser<B> y) {
-        var label = String.format("%s then %s", x.label(), y.label());
-        return setLabel(bind(r1 -> bind(r2 -> pure(Tuple.of(r1, r2)), y), x), label);
+    public static <A, B> Parser<Tuple<A, B>> then(Parser<A> p1, Parser<B> p2) {
+        var label = String.format("%s then %s", p1.label(), p2.label());
+        return setLabel(bind(r1 -> bind(r2 -> pure(Tuple.of(r1, r2)), p2), p1), label);
     }
 
     public static <A> Parser<A> or(Parser<A> p1, Parser<A> p2) {
         var label = String.format("%s or %s", p1.label(), p2.label());
         Function<State, Result<Tuple<A, State>>> fn = input -> {
-            var r1 = runOnInput(p1, input);
-            if (r1 instanceof Result.Success<Tuple<A, State>>) {
-                return r1;
+            var res = runOnInput(p1, input);
+            if (res instanceof Result.Success<Tuple<A, State>>) {
+                return res;
             } else {
                 return runOnInput(p2, input);
             }
@@ -104,16 +103,11 @@ public final class Combinator<A> {
     }
 
     public static <A> Parser<List<A>> sequence(List<Parser<A>> parsers) {
-        Function<A, Function<List<A>, List<A>>> cons = head -> tail -> {
-            var arr = new ArrayList<A>();
-            arr.add(head);
-            arr.addAll(tail);
-            return arr.stream().toList();
-        };
+        Function<A, Function<List<A>, List<A>>> curryCons = head -> tail -> cons(head, tail);
         if (parsers.isEmpty()) {
             return pure(List.of());
         } else {
-            return lift2(cons, parsers.get(0), sequence(parsers.subList(1, parsers.size())));
+            return lift2(curryCons, parsers.get(0), sequence(parsers.subList(1, parsers.size())));
         }
     }
 
@@ -130,34 +124,24 @@ public final class Combinator<A> {
             var subsequenceValue = t2.t1();
             var remaining = t2.t2();
 
-            var arr = new ArrayList<A>();
-            arr.add(firstValue);
-            arr.addAll(subsequenceValue);
-
-            return Tuple.of(arr.stream().toList(), remaining);
+            return Tuple.of(cons(firstValue, subsequenceValue), remaining);
         }
     }
 
-    public static <A> Parser<List<A>> many(Parser<A> parser) {
-        var label = String.format("many %s", parser.label());
-        Function<State, Result<Tuple<List<A>, State>>> fn = input -> Result.Success.of(parseZeroOrMore(parser, input));
+    public static <A> Parser<List<A>> many(Parser<A> p) {
+        var label = String.format("many %s", p.label());
+        Function<State, Result<Tuple<List<A>, State>>> fn = input -> Result.Success.of(parseZeroOrMore(p, input));
         return Parser.of(fn, label);
     }
 
-    public static <A> Parser<List<A>> many1(Parser<A> parser) {
-        var label = String.format("many1 %s", parser.label());
-        Function<A, Function<List<A>, List<A>>> cons = head -> tail -> {
-            var arr = new ArrayList<A>();
-            arr.add(head);
-            arr.addAll(tail);
-            return arr.stream().toList();
-        };
-        return setLabel(bind(head -> bind(tail -> pure(cons.apply(head).apply(tail)), many(parser)), parser), label);
+    public static <A> Parser<List<A>> many1(Parser<A> p) {
+        var label = String.format("many1 %s", p.label());
+        return setLabel(bind(head -> bind(tail -> pure(cons(head, tail)), many(p)), p), label);
     }
 
-    public static <A> Parser<Optional<A>> opt(Parser<A> parser) {
-        var label = String.format("opt %s", parser.label());
-        return setLabel(or(map(x -> Optional.of(x), parser), pure(Optional.empty())), label);
+    public static <A> Parser<Optional<A>> opt(Parser<A> p) {
+        var label = String.format("opt %s", p.label());
+        return setLabel(or(map(x -> Optional.of(x), p), pure(Optional.empty())), label);
     }
 
     public static <A, B> Parser<B> discardL(Parser<A> p1, Parser<B> p2) {
@@ -173,14 +157,8 @@ public final class Combinator<A> {
     }
 
     public static <A, B> Parser<List<A>> sepBy1(Parser<A> p, Parser<B> sep) {
-        Function<A, Function<List<A>, List<A>>> cons = head -> tail -> {
-            var arr = new ArrayList<A>();
-            arr.add(head);
-            arr.addAll(tail);
-            return arr.stream().toList();
-        };
         var sepThen = discardL(sep, p);
-        return map(t -> cons.apply(t.t1()).apply(t.t2()), then(p, many(sepThen)));
+        return map(t -> cons(t.t1(), t.t2()), then(p, many(sepThen)));
     }
 
     public static <A, B> Parser<List<A>> sepBy(Parser<A> p, Parser<B> sep) {
@@ -195,5 +173,12 @@ public final class Combinator<A> {
     public static Parser<Character> anyOf(List<Character> chars) {
         var label = String.format("%s", chars.toString());
         return setLabel(choice(chars.stream().map(c -> pchar(c)).toList()), label);
+    }
+
+    public static <A> List<A> cons(A head, List<A> tail) {
+        var lists = new ArrayList<A>();
+        lists.add(head);
+        lists.addAll(tail);
+        return lists.stream().toList();
     }
 }

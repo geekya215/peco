@@ -4,7 +4,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
-public final class Func {
+public final class Input {
     public static Position initialPosition() {
         return new Position(0, 0);
     }
