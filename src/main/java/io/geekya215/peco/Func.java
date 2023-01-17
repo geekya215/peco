@@ -54,4 +54,8 @@ public final class Func {
             return Tuple.of(newState, Optional.of(c));
         }
     }
+
+    public static Location getLocationFromState(State state) {
+        return new Location(currentLine(state), state.position().line(), state.position().column());
+    }
 }
