@@ -10,7 +10,7 @@ public final class Input {
     }
 
     public static Position incrementLine(Position position) {
-        return new Position(position.line() + 1, position.column());
+        return new Position(position.line() + 1, 0);
     }
 
     public static Position incrementColumn(Position position) {
