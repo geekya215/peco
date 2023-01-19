@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 public final class Combinator {
     public static <A> Result<Tuple<A, State>> runOnInput(Parser<A> parser, State state) {
@@ -17,29 +18,6 @@ public final class Combinator {
 
     public static <A> Parser<A> setLabel(Parser<A> parser, String label) {
         return Parser.of(parser.fn(), label);
-    }
-
-    public static Parser<Character> satisfy(Predicate<Character> predicate, String label) {
-        Function<State, Result<Tuple<Character, State>>> fn = input -> {
-            var t = Input.nextChar(input);
-            var remaining = t.t1();
-            var c = t.t2();
-            if (c.isEmpty()) {
-                var error = "No more input";
-                var location = Input.getLocationFromState(input);
-                return Result.Failure.of(label, error, location);
-            } else {
-                var first = c.get();
-                if (predicate.test(first)) {
-                    return Result.Success.of(Tuple.of(first, remaining));
-                } else {
-                    var error = String.format("Unexpected '%c'", first);
-                    var location = Input.getLocationFromState(input);
-                    return Result.Failure.of(label, error, location);
-                }
-            }
-        };
-        return Parser.of(fn, label);
     }
 
     public static <A, B> Parser<B> bind(Function<A, Parser<B>> f, Parser<A> p) {
@@ -62,6 +40,29 @@ public final class Combinator {
     public static <A> Parser<A> pure(A a) {
         var label = a.toString();
         Function<State, Result<Tuple<A, State>>> fn = input -> Result.Success.of(Tuple.of(a, input));
+        return Parser.of(fn, label);
+    }
+
+    public static Parser<Character> satisfy(Predicate<Character> predicate, String label) {
+        Function<State, Result<Tuple<Character, State>>> fn = input -> {
+            var t = Input.nextChar(input);
+            var remaining = t.t1();
+            var c = t.t2();
+            if (c.isEmpty()) {
+                var error = "No more input";
+                var location = Input.getLocationFromState(input);
+                return Result.Failure.of(label, error, location);
+            } else {
+                var first = c.get();
+                if (predicate.test(first)) {
+                    return Result.Success.of(Tuple.of(first, remaining));
+                } else {
+                    var error = String.format("Unexpected '%c'", first);
+                    var location = Input.getLocationFromState(input);
+                    return Result.Failure.of(label, error, location);
+                }
+            }
+        };
         return Parser.of(fn, label);
     }
 
@@ -97,8 +98,8 @@ public final class Combinator {
 
     public static <A> Parser<A> choice(List<Parser<A>> parsers) {
         Function<State, Result<Tuple<A, State>>> fn = __ ->
-            Result.Failure.of("empty choice", "empty choice", new Location("", 0, 0));
-        var identity = Parser.of(fn, "empty choice");
+            Result.Failure.of("choice list", "empty choice list", new Location("", 0, 0));
+        var identity = Parser.of(fn, "choice list");
         return parsers.stream().reduce(identity, Combinator::or);
     }
 
@@ -128,20 +129,10 @@ public final class Combinator {
         }
     }
 
-    public static <A> Parser<List<A>> many(Parser<A> p) {
-        var label = String.format("many %s", p.label());
-        Function<State, Result<Tuple<List<A>, State>>> fn = input -> Result.Success.of(parseZeroOrMore(p, input));
-        return Parser.of(fn, label);
-    }
-
-    public static <A> Parser<List<A>> many1(Parser<A> p) {
-        var label = String.format("many1 %s", p.label());
-        return setLabel(bind(head -> bind(tail -> pure(cons(head, tail)), many(p)), p), label);
-    }
 
     public static <A> Parser<Optional<A>> opt(Parser<A> p) {
         var label = String.format("opt %s", p.label());
-        return setLabel(or(map(x -> Optional.of(x), p), pure(Optional.empty())), label);
+        return setLabel(or(map(Optional::of, p), pure(Optional.empty())), label);
     }
 
     public static <A, B> Parser<B> discardL(Parser<A> p1, Parser<B> p2) {
@@ -156,23 +147,86 @@ public final class Combinator {
         return discardR(discardL(p1, p2), p3);
     }
 
-    public static <A, B> Parser<List<A>> sepBy1(Parser<A> p, Parser<B> sep) {
-        var sepThen = discardL(sep, p);
-        return map(t -> cons(t.t1(), t.t2()), then(p, many(sepThen)));
+    public static <A> Parser<List<A>> many(Parser<A> p) {
+        var label = String.format("many %s", p.label());
+        Function<State, Result<Tuple<List<A>, State>>> fn = input -> Result.Success.of(parseZeroOrMore(p, input));
+        return Parser.of(fn, label);
+    }
+
+    public static <A> Parser<List<A>> many1(Parser<A> p) {
+        var label = String.format("many1 %s", p.label());
+        return setLabel(bind(head -> bind(tail -> pure(cons(head, tail)), many(p)), p), label);
     }
 
     public static <A, B> Parser<List<A>> sepBy(Parser<A> p, Parser<B> sep) {
         return or(sepBy1(p, sep), pure(List.of()));
     }
 
-    public static Parser<Character> pchar(Character c) {
-        var label = String.format("%c", c);
-        return satisfy(x -> x == c, label);
+    public static <A, B> Parser<List<A>> sepBy1(Parser<A> p, Parser<B> sep) {
+        var sepThen = discardL(sep, p);
+        return map(t -> cons(t.t1(), t.t2()), then(p, many(sepThen)));
     }
 
     public static Parser<Character> anyOf(List<Character> chars) {
         var label = String.format("%s", chars.toString());
-        return setLabel(choice(chars.stream().map(c -> pchar(c)).toList()), label);
+        return setLabel(choice(chars.stream().map(Combinator::character).toList()), label);
+    }
+
+    public static Parser<Character> character(Character c) {
+        var label = String.format("'%c'", c);
+        return satisfy(x -> x == c, label);
+    }
+
+    public static Parser<String> string(String str) {
+        return map(
+            xs -> xs.stream().map(String::valueOf).collect(Collectors.joining()),
+            sequence(str.chars().mapToObj(e -> (char) e).map(c -> character(c)).toList())
+        );
+    }
+
+    public static Parser<Character> space() {
+        var label = "<whitespace>";
+        return satisfy(Character::isWhitespace, label);
+    }
+
+    public static Parser<List<Character>> spaces() {
+        var label = "<many whitespace>";
+        return many(space());
+    }
+
+    public static Parser<Character> newline() {
+        var label = "<newline>";
+        return satisfy(c -> c == '\n', label);
+    }
+
+    public static Parser<Character> tab() {
+        var label = "<tab>";
+        return satisfy(c -> c == '\t', label);
+    }
+
+    public static Parser<Character> upper() {
+        var label = "uppercase letter";
+        return satisfy(Character::isUpperCase, label);
+    }
+
+    public static Parser<Character> lower() {
+        var label = "lowercase letter";
+        return satisfy(Character::isLowerCase, label);
+    }
+
+    public static Parser<Character> digit() {
+        var label = "digit";
+        return satisfy(Character::isDigit, label);
+    }
+
+    public static Parser<Character> letter() {
+        var label = "letter";
+        return satisfy(Character::isLetter, label);
+    }
+
+    public static Parser<Character> alphaNum() {
+        var label = "letter or digit";
+        return satisfy(Character::isLetterOrDigit, label);
     }
 
     public static <A> List<A> cons(A head, List<A> tail) {
