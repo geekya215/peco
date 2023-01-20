@@ -6,6 +6,7 @@ import java.util.Optional;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public final class Combinator {
     public static <A> Result<Tuple<A, State>> runOnInput(Parser<A> parser, State state) {
@@ -170,6 +171,12 @@ public final class Combinator {
     public static Parser<Character> anyOf(List<Character> chars) {
         var label = String.format("%s", chars.toString());
         return setLabel(choice(chars.stream().map(Combinator::character).toList()), label);
+    }
+
+    public static <A> Parser<List<A>> count(Integer n, Parser<A> p) {
+        return n <= 0
+            ? pure(List.of())
+            : sequence(Stream.generate(() -> Parser.of(p.fn(), p.label())).limit(n).collect(Collectors.toList()));
     }
 
     public static Parser<Character> character(Character c) {
