@@ -130,7 +130,6 @@ public final class Combinator {
         }
     }
 
-
     public static <A> Parser<Optional<A>> opt(Parser<A> p) {
         var label = String.format("opt %s", p.label());
         return setLabel(or(map(Optional::of, p), pure(Optional.empty())), label);
@@ -187,7 +186,7 @@ public final class Combinator {
     public static Parser<String> string(String str) {
         return map(
             xs -> xs.stream().map(String::valueOf).collect(Collectors.joining()),
-            sequence(str.chars().mapToObj(e -> (char) e).map(c -> character(c)).toList())
+            sequence(str.chars().mapToObj(e -> (char) e).map(Combinator::character).toList())
         );
     }
 
@@ -198,7 +197,7 @@ public final class Combinator {
 
     public static Parser<List<Character>> spaces() {
         var label = "<many whitespace>";
-        return many(space());
+        return setLabel(many(space()), label);
     }
 
     public static Parser<Character> newline() {
